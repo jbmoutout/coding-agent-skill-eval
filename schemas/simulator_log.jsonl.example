@@ -1,0 +1,2 @@
+{"ts": "2026-05-18T10:00:00Z", "run_id": "<uuid>", "elapsed_s": 1.42, "messages_in": [{"role": "SystemMessage", "content": "<persona prompt>"}, {"role": "HumanMessage", "content": "<previous agent turn>"}], "response_text": "<simulator's reply>", "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}}
+{"ts": "2026-05-18T10:00:00Z", "run_id": "<uuid>", "error": "APIConnectionError: <message>"}

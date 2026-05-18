@@ -1,0 +1,5 @@
+anthropic
+langchain-core
+langchain-openai
+openai
+openevals

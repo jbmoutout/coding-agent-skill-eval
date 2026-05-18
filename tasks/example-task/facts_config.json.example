@@ -1,0 +1,48 @@
+{
+  "_comment": "Per-task ground-truth data for scripts/grade_facts.py. Layer 1 (mechanical fact-check) reads concrete claims out of a SETTLED_DESIGN.md and verifies them against the codebase + this config. Every entry below is task-specific; populate from your own verified facts about the codebase under evaluation.",
+
+  "repo_root": "/absolute/path/to/codebase-under-evaluation",
+  "_repo_root_note": "Overridden by the TARGET_REPO_ROOT environment variable at runtime.",
+
+  "known_existing_files": [
+    "src/lib/example-singleton.ts",
+    "middleware.ts"
+  ],
+  "_known_existing_files_note": "Files agents commonly cite as 'this exists today'. Verifier confirms they're present at the pinned commit. Add the files your task's design discussions tend to reference.",
+
+  "common_proposed_files": [
+    "src/lib/context.ts",
+    "src/lib/di/index.ts"
+  ],
+  "_common_proposed_files_note": "Files agents commonly PROPOSE creating as part of the refactor. Verifier confirms they're absent today (i.e. genuinely new). Add the files your task's design space tends to suggest.",
+
+  "ground_truth_counts": {
+    "disconnect": 15,
+    "anthropic_routes": 3,
+    "total_routes": 22
+  },
+  "_ground_truth_counts_note": "Per-target counts verified by hand at the pinned commit. Each key is referenced by count_target_map below. Add or rename keys as your task requires.",
+
+  "count_target_map": {
+    "disconnect": "disconnect",
+    "anthropic": "anthropic_routes",
+    "route.ts": "total_routes",
+    "routes": "total_routes"
+  },
+  "_count_target_map_note": "Maps substrings the agent might use when claiming a count (e.g. 'disconnect', 'anthropic', 'routes') to keys in ground_truth_counts. First substring match wins; if no key matches, the count claim is marked UNVERIFIABLE.",
+
+  "real_vulns": [
+    "src/api/example-vulnerable-route.ts"
+  ],
+  "_real_vulns_note": "Routes / files where a real, verified vulnerability exists. Layer 2 (grade_constraints.py) uses this to score whether the design acknowledges the vulnerability rather than silently leaving it in scope.",
+
+  "security_patterns": [
+    "userId\\s+from\\s+request\\.json",
+    "userId\\s+from\\s+(?:the\\s+)?(?:request\\s+)?body",
+    "searchParams.*userId",
+    "userId.*searchParams",
+    "unverified\\s+userId",
+    "trust\\s+gap.*userId|userId.*trust\\s+gap"
+  ],
+  "_security_patterns_note": "Regex patterns the agent's design might use to indicate awareness of the security vulnerabilities listed in real_vulns. Match = the design flagged the issue. Tune to your task's specific vulnerability shapes."
+}

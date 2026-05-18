@@ -1,0 +1,33 @@
+# example-task - reviewer notes (PRIVATE)
+
+**Do not feed this file to the agent.** It contains the answer key. Runners
+must include only the public `task.md` in any prompt.
+
+## Known architectural pressures
+
+The friction sources the reviewer should weigh when scoring criterion 1
+(Problem identification). A strong agent should recognize the highest-leverage
+cluster and not attempt to fix everything.
+
+1. _(placeholder)_ First architectural pressure - e.g. "auth state read from
+   three different sources, no single decoder."
+2. _(placeholder)_ Second pressure - e.g. "duplicate client singletons at
+   `lib/foo.ts` and `app/lib/foo.ts`."
+3. _(placeholder)_ Third pressure ...
+
+The structured form of this list lives in `findings.json`, which the
+`findings_recall` panel scores against mechanically.
+
+## Scoring guidance
+
+- "Highest-leverage friction" = _(name the cluster the strongest agent should
+  surface as the priority; explain why)_.
+- A run that catches item N (low-priority) but misses items 1-3 has good
+  code-reading skills but bad architectural judgement. Score criterion 1
+  accordingly.
+- The catalog's negative-finding entry (a deliberately false claim about, say,
+  "X file is dead code") tests whether the agent pools surface-pattern-matched
+  claims. Watch for the trap.
+- The reviewer who authored this list is contaminated by construction. Accept
+  the familiarity bias as a known calibration limit; bring in a second blind
+  reviewer when stakes warrant it.

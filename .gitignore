@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+.python-version
+
+# Eval outputs - never publish results
+results/
+*.jsonl
+!schemas/*.jsonl.example
+*_openrouter_activity*.csv
+reconcile_result.json
+eval_report.json
+eval_report.md
+
+# Per-task private files (anything matching the .private.md pattern)
+*.private.md
+!*.private.md.example
+
+# Real catalogs - only the .example schema files ship
+findings.json
+facts_config.json
+!*.example
+
+# Runtime config that may hold secrets
+.env
+.env.*
+!.env.example
+opencode.json
+!config/opencode.json.example
+
+# Local agent/runtime state
+.omx/
+.codex/
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*~

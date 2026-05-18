@@ -1,0 +1,68 @@
+{
+  "_comment": "Per-rep eval_report.json for Part II (multi-turn agent <-> sim). Written by scripts/grade_run.py at <rep_dir>/eval/eval_report.json. Layers come from grade_facts.py, grade_constraints.py, grade_judge.py.",
+
+  "rep_dir": "/path/to/<cell>/rep<N>",
+  "cell": "<cell-short-name>",
+  "agent_model": "Display name of the agent LLM",
+  "sim_model": "Display name of the simulator LLM",
+  "persona": "original | hardened (anti-fabrication)",
+
+  "composite_score": 0.0,
+  "weights": {
+    "facts": 0.30,
+    "coverage": 0.25,
+    "judge_a": 0.20,
+    "judge_c": 0.15,
+    "sim_fidelity": 0.10
+  },
+  "_composite_note": "composite = 0.30*facts + 0.25*coverage + 0.20*judgeA/5 + 0.15*judgeC/5 + 0.10*sim_fidelity. For no-grilling baselines (no SIM, no judgeC), weights are re-normalized over the applicable terms.",
+
+  "validity_tier": "GREEN | YELLOW | RED | UNKNOWN | N/A",
+  "validity_reason": "One sentence explaining the tier (e.g. 'sim_fidelity=96.2%, 2 fabricated claims').",
+  "_validity_tier_note": "Driven by SIM fidelity, kept separate from composite. A RED rep is 'design may be shaped by invented input'; reader should not directly rank it against GREEN reps. UNKNOWN = judge B parse-failed. N/A = no-grilling baseline (no SIM).",
+
+  "facts": {
+    "_note": "Output of grade_facts.py",
+    "facts_score": 0.0,
+    "n_pass": 0,
+    "n_fail": 0,
+    "n_unverifiable": 0,
+    "results": []
+  },
+
+  "constraints": {
+    "_note": "Output of grade_constraints.py - keyword-prefilter + LLM verification per constraint",
+    "coverage_score": 0.0,
+    "n_addressed_cleanly": 0,
+    "n_addressed_weakly": 0,
+    "n_not_addressed": 0,
+    "n_judge_calls": 0,
+    "results": []
+  },
+
+  "judge": {
+    "_note": "Output of grade_judge.py - three structured-output passes",
+    "judge_a_settled": {
+      "implementability": 0,
+      "problem_solving": 0,
+      "api_coherence": 0,
+      "tradeoff_articulation": 0,
+      "summary": "..."
+    },
+    "judge_a_avg": 0.0,
+    "judge_b_sim_fidelity": {
+      "turns": [],
+      "totals": {"grounded": 0, "hedged": 0, "fabricated": 0},
+      "summary": "..."
+    },
+    "sim_fidelity_score": 0.0,
+    "n_fabricated_claims": 0,
+    "judge_c_agent_grilling": {
+      "question_sharpness": 0,
+      "code_grounding": 0,
+      "subagent_decomposition": 0,
+      "summary": "..."
+    },
+    "judge_c_avg": 0.0
+  }
+}

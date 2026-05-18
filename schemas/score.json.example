@@ -1,0 +1,84 @@
+{
+  "_comment": "Per-rep score record schema for Part I (skill ablation). One score.json lives in each rep directory. All fields are namespaced by source (rubric / skill_adherence / transcript_checks_summary / findings_recall / tool_use / cost) so derived metrics never accidentally mix provenance.",
+
+  "run_id": "<cell>-<rep>",
+  "task_id": "example-task",
+  "model": "openrouter/<provider>/<model>",
+  "harness": "opencode (via OpenRouter)",
+  "skill": "/improve-codebase-architecture",
+  "skill_variant": "skill-on",
+  "synthesis_locus": "main",
+  "scored_by": "hand | hybrid (proposer + ratifier) | judge",
+  "_scored_by_note": "Declares bias profile. Pure-human, hybrid, and LLM-judge each have different bias shapes; readers should see which was used.",
+
+  "rubric": {
+    "problem_identification":    {"score": 0, "rationale": "..."},
+    "depth_improvement_framing": {"score": 0, "rationale": "..."},
+    "locality_reasoning":        {"score": 0, "rationale": "..."},
+    "leverage_reasoning":        {"score": 0, "rationale": "..."},
+    "seam_quality":              {"score": 0, "rationale": "..."},
+    "testing_strategy":          {"score": 0, "rationale": "..."},
+    "run_shape_compliance":      {"score": 0, "subchecks": {}},
+    "total": {"score": 0, "max": 86, "percentage": 0.0}
+  },
+
+  "skill_adherence": {
+    "_note": "Applies only to skill-on arm. Skill-off runs set {\"applies\": false}.",
+    "sa1_FPSB_structure":     {"score": 0, "note": "..."},
+    "sa2_no_ts_sigs":         {"score": 0, "note": "..."},
+    "sa3_no_forbidden_vocab": {"score": 0, "note": "..."},
+    "sa4_skill_vocab_used":   {"score": 0, "note": "..."},
+    "total": {"score": 0, "max": 7}
+  },
+
+  "transcript_checks_summary": {
+    "_note": "Output of scripts/transcript_checks.py",
+    "candidate_count_actual": 0,
+    "structure_pass_actual": false,
+    "gate_present": false,
+    "forbidden_vocab_hits": 0,
+    "ts_sigs_in_candidates": 0,
+    "file_mentions_unique": 0,
+    "line_citations": 0,
+    "word_count": 0,
+    "final_text_chars": 0,
+    "prose_degradation_signals": {"cjk_chars": 0, "examples": []}
+  },
+
+  "findings_recall": {
+    "_note": "Output of scripts/findings_recall.py",
+    "judge": "anthropic/<model> | openai/<model> | openrouter/<route>",
+    "total_positives": 0,
+    "positives_surfaced": 0,
+    "positives_surfaced_ids": [],
+    "negatives_asserted_unhedged": [],
+    "negatives_asserted_hedged": [],
+    "recall": 0.0
+  },
+
+  "tool_use": {
+    "_note": "Output of scripts/tool_use.py - tagged manual/heuristic/automatic per metric",
+    "tool_call_count": 0,
+    "by_tool": {},
+    "useful_call_ratio_heuristic": 0.0,
+    "context_pollution_events": 0,
+    "exploration_convergence": "narrowed | mostly_narrowed | mixed | thrashed",
+    "wall_seconds": 0,
+    "time_to_first_candidate_seconds": 0,
+    "synthesis_locus": "main | subagent | mixed"
+  },
+
+  "cost": {
+    "agent_run": {
+      "actual_openrouter_cost_usd": 0.0,
+      "actual_tokens_prompt": 0,
+      "actual_tokens_completion": 0,
+      "actual_cache_hit_ratio_openrouter": 0.0,
+      "actual_provider": "Anthropic | DeepInfra | Morph | ...",
+      "reconciled_from": "OpenRouter activity CSV (YYYY-MM-DD)",
+      "wall_seconds": 0,
+      "tokens_in_recorded_DEPRECATED_self_report": 0,
+      "_deprecated_note": "Harness self-reports off by 2-52x in observed runs. Preserved for audit, never used for derived metrics."
+    }
+  }
+}

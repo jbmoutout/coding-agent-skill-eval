@@ -1,0 +1,68 @@
+{
+  "task_id": "example-task",
+  "repo": "<your-codebase>",
+  "commit": "<pinned-commit-sha>",
+  "verified_against": "<path or commit ref the catalog was verified against>",
+  "schema_version": "1.3",
+  "_comment": "Hand-verified catalog of architectural friction at the pinned commit. Used by rubric criterion 1 (Problem identification) and the findings_recall panel. positive_findings = real defects/smells an attentive run should surface; negative_findings = claims that look architecturally plausible but are false at this commit. Catalog quality is two-pass: author audit against the code + cross-family external auditor (e.g. a different LLM family).",
+
+  "audit_log": [
+    {
+      "date": "YYYY-MM-DD",
+      "auditor": "human (cross-checked at <commit>)",
+      "trigger": "Reason this audit was performed.",
+      "findings_corrected": ["<finding_id> (what was wrong)"],
+      "findings_refined": ["<finding_id> (what was clarified)"],
+      "findings_unchanged": ["<finding_id>"]
+    },
+    {
+      "date": "YYYY-MM-DD",
+      "auditor": "<external model> (given adversarial-audit prompt + code access)",
+      "trigger": "Cross-family validation of the catalog before wiring the FActScore-style judge.",
+      "overall_quality_score": "N/100 + one-sentence rationale",
+      "findings_corrected": [],
+      "findings_added": [],
+      "findings_flagged_compound_but_kept": []
+    }
+  ],
+
+  "positive_findings": [
+    {
+      "id": "example_positive_finding_id",
+      "atomic_claim": "[REDACTED] A single verifiable claim about a specific architectural defect at a specific location.",
+      "category": "auth | data_layer | config | testability | correctness | ...",
+      "severity": "defect | smell | shallow_module",
+      "location_primary": "path/to/file.ts:LINE",
+      "additional_sites": [
+        "path/to/other-file.ts:LINE"
+      ],
+      "description": "[REDACTED] Short prose description of the defect for human reviewers.",
+      "consequences": "[REDACTED] Why this matters (correctness, security, testability, etc).",
+      "evidence_hints": [
+        "regex.*the.*judge.*should.*see",
+        "phrasing.*pattern.*1",
+        "phrasing.*pattern.*2"
+      ],
+      "sub_claims": [
+        "Optional: split a compound claim into parts for partial credit (FActScore precondition).",
+        "If present, the LLM judge treats partial surfacing as 'yes' with quality='implicit'."
+      ],
+      "audit_note": "Optional: what the audit pass changed about this entry, and when.",
+      "v1_attribution_caveat": "Optional: where prior-version model attributions might be misaligned with the current pin."
+    }
+  ],
+
+  "negative_findings": [
+    {
+      "id": "example_negative_trap_id",
+      "atomic_claim": "[REDACTED] A plausible-sounding architectural claim that is FALSE at this commit (e.g. 'foo.ts is dead code').",
+      "category": "trap",
+      "severity": "false_positive",
+      "location": "path/to/file.ts",
+      "why_wrong": "[REDACTED] Why this claim is false at the pinned commit. The agent's assertion of this claim is a hallucination signal.",
+      "evidence_hints": [
+        "phrasings.*the.*judge.*should.*flag"
+      ]
+    }
+  ]
+}

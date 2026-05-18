@@ -1,0 +1,35 @@
+# SKILL-OFF arm of the paired ablation. Identical to Dockerfile except the
+# global skill install is deliberately omitted, so the agent literally cannot
+# self-discover the skill via its `skills` tool. Ablation lives in the image,
+# not in the prompt - the skill-off prompt could still ask for skill-adjacent
+# behavior, but the skill itself isn't installed for the agent to invoke.
+
+FROM node:24-bookworm
+
+# System deps generally useful for coding agents
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    jq \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install opencode (the agent harness)
+RUN curl -fsSL https://opencode.ai/install | bash
+ENV PATH="/root/.opencode/bin:$PATH"
+
+# (INTENTIONALLY OMITTED) The global skill install line that lives in
+# Dockerfile is dropped here. Verified by running with the skill-off
+# prompt: the agent does NOT self-discover the skill. If you swap the
+# harness for one that auto-installs skills from a different source,
+# scrub that path here too.
+
+WORKDIR /app
+
+# --- CUSTOMIZE for your target codebase below this line ---
+#
+# Keep this section byte-identical to Dockerfile's. The whole point of the
+# paired ablation is that the only difference between the two images is the
+# skill install. Any drift in dependencies, system packages, or codebase
+# contents pollutes the comparison.
+
+CMD ["bash"]

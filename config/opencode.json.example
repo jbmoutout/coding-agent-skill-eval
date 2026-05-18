@@ -1,0 +1,34 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "_comment": "opencode configuration mounted into the agent container by scripts/run_grilling_openevals.py (and run_no_grilling.py). Register every agent model you intend to use under the `openrouter.models` block. The `model` field below is the default; the --agent-model CLI flag overrides it per run.",
+
+  "model": "openrouter/anthropic/claude-opus-4.7",
+  "provider": {
+    "openrouter": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "OpenRouter",
+      "options": {
+        "baseURL": "https://openrouter.ai/api/v1",
+        "apiKey": "{env:OPENROUTER_API_KEY}"
+      },
+      "models": {
+        "anthropic/claude-opus-4.7": {
+          "name": "Claude Opus 4.7",
+          "limit": {"context": 200000, "output": 16384}
+        },
+        "qwen/qwen3.6-27b": {
+          "name": "Qwen3.6 27B",
+          "limit": {"context": 262144, "output": 81920}
+        },
+        "moonshotai/kimi-k2.6": {
+          "name": "Kimi K2.6",
+          "limit": {"context": 200000, "output": 16384}
+        },
+        "deepseek/deepseek-v4-flash": {
+          "name": "Deepseek v4 Flash",
+          "limit": {"context": 131072, "output": 16384}
+        }
+      }
+    }
+  }
+}
