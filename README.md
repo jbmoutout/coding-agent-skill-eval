@@ -141,6 +141,13 @@ variables; `.env` and real result artifacts are ignored by git.
   conversation that follows is the variable
 - opencode session SQLite is volume-mounted (survives `docker --rm`)
 - provider-error detection: OpenRouter 402, silent stalls
+- SIM routing inferred from model name: `provider/model` → OpenRouter,
+  bare name (e.g. `gpt-5.5`) → OpenAI direct
+- pre-run safety: docker image vintage logged + overwrite guard on
+  already-graded reps
+- post-run validation: refuses to grade reps that didn't emit
+  `SETTLED_DESIGN.md`; on success, auto-chains extract → grade → viewer
+  → compare
 
 **Persona**
 - composite: generic SWE traits + codebase snippets at the pinned commit

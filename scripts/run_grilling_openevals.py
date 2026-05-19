@@ -17,6 +17,10 @@ We handle:
     - Reading the agent's latest text from raw_export.jsonl after each docker run
     - Session-id persistence across docker spin-ups (closure state)
     - Custom stopping condition that peeks at opencode's event log
+    - SIM routing: "/" in simulator model name → OpenRouter; else OpenAI direct
+    - Pre-run safety (docker image age, overwrite guard)
+    - Post-run validation (SETTLED was written) + auto-chain
+      (extract → grade → viewer → compare)
 
 Usage:
     run_grilling_openevals.py --cell <name> --rep <N>
@@ -24,6 +28,7 @@ Usage:
         --docker-image <tag> --prompt-file <path>
         [--persona <path>] [--opencode-config <path>]
         [--max-turns 15]
+        [--overwrite] [--no-postprocess] [-v|--verbose]
 
 Env (all optional):
     EVAL_RESULTS_ROOT  - root for output dirs (default: <repo>/results)
@@ -70,15 +75,63 @@ AGENT_MODEL = None
 OPENCODE_CONFIG = None
 SIMULATOR_MODEL = None
 INITIAL_PROMPT = None
+OVERWRITE = False
+NO_POSTPROCESS = False
+VERBOSE = False
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPTS_DIR.parent
 
 
+# -------- Pretty terminal output --------
+# log() always writes to run.log. Stdout is gated on VERBOSE so the default
+# experience is clean; term()/banner() print structured status for humans
+# regardless of VERBOSE.
+def _is_tty():
+    return sys.stdout.isatty()
+
+
+def _ansi(s, code):
+    return f"\033[{code}m{s}\033[0m" if _is_tty() else s
+
+
+def _cyan(s):    return _ansi(s, "1;36")
+def _green(s):   return _ansi(s, "1;32")
+def _yellow(s):  return _ansi(s, "1;33")
+def _red(s):     return _ansi(s, "1;31")
+def _dim(s):     return _ansi(s, "2")
+
+
+_ICONS = {
+    "info": _cyan("→"),    # arrow
+    "ok":   _green("✓"),   # check
+    "warn": _yellow("!"),
+    "fail": _red("✗"),     # cross
+}
+
+
+def term(msg, level="info"):
+    """Single-line pretty status. Always prints to stdout."""
+    icon = _ICONS.get(level, _ICONS["info"])
+    print(f"  {icon}  {msg}", flush=True)
+
+
+def banner(title):
+    bar = "─" * max(28, min(72, len(title) + 6))
+    print(_cyan(f"\n{bar}"), flush=True)
+    print(_cyan(f"  {title}"), flush=True)
+    print(_cyan(f"{bar}"), flush=True)
+
+
+def kv(label, value):
+    """Key/value line for run banners."""
+    print(f"  {_dim(label + ':'):<22} {value}", flush=True)
+
+
 # -------- Helpers --------
 def log(msg):
-    line = f"[orchestrator rep{REP}] {msg}"
-    print(line, flush=True)
+    if VERBOSE:
+        print(f"[orchestrator rep{REP}] {msg}", flush=True)
     with open(RUN_LOG, "a") as f:
         ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         f.write(f"{ts} {msg}\n")
@@ -340,7 +393,10 @@ def opencode_app(message, thread_id=None, **kwargs):
     # a new agent text actually landed (docker can exit 0 with no new events
     # if opencode/the provider errored - see e.g. OpenRouter 402 credits).
     pre_text_count = count_text_events()
+    pre_task_count = total_task_uses()
 
+    turn_n = pre_text_count + 1
+    term(f"Turn {turn_n}: sending msg ({len(message_to_send):,} chars) → agent thinking…")
     log(f"opencode_app: sending msg len={len(message_to_send)}, "
         f"session={_session_id['value'] or '<new>'}")
     t0 = time.time()
@@ -349,6 +405,7 @@ def opencode_app(message, thread_id=None, **kwargs):
     log(f"opencode_app: docker exit={result.returncode}, wall={elapsed:.1f}s")
     if result.returncode != 0:
         log(f"opencode_app: stderr: {result.stderr[:500]}")
+        term(f"docker exited {result.returncode} on turn {turn_n}", level="fail")
         raise RuntimeError(f"opencode exited {result.returncode}: {result.stderr[:200]}")
 
     # Capture session id on first turn
@@ -369,6 +426,7 @@ def opencode_app(message, thread_id=None, **kwargs):
             err_msg = err_data.get("message") or str(err_payload)[:300]
             err_code = err_data.get("statusCode") or err_payload.get("name") or "?"
             log(f"opencode_app: PROVIDER ERROR detected (code={err_code}): {err_msg}")
+            term(f"provider error {err_code}: {err_msg[:120]}", level="fail")
             raise RuntimeError(f"opencode/provider error {err_code}: {err_msg}")
         # Silent stall - no new text event, no error event. Known opencode
         # failure mode: message parts (text + step-finish reason='stop') are
@@ -379,16 +437,27 @@ def opencode_app(message, thread_id=None, **kwargs):
             synthesize_text_event(recovered, msg_id)
             log(f"opencode_app: RECOVERED {len(recovered)} chars from sqlite "
                 f"(msg={msg_id}, completed={completed}) - synthesized text event")
+            term(f"sqlite recovery: salvaged {len(recovered):,} chars "
+                 f"(opencode flush bug)", level="warn")
             agent_text = recovered
+            post_task_count = total_task_uses()
+            term(f"Turn {turn_n} done ({elapsed:.0f}s): "
+                 f"{len(agent_text):,} chars, "
+                 f"+{post_task_count - pre_task_count} subagents", level="ok")
             log(f"opencode_app: agent returned text len={len(agent_text)}, "
-                f"total task_uses so far={total_task_uses()}")
+                f"total task_uses so far={post_task_count}")
             return {"role": "assistant", "content": agent_text}
         log("opencode_app: silent stall AND sqlite recovery found no text - aborting")
+        term(f"silent stall on turn {turn_n} (no text in SQLite either)", level="fail")
         raise RuntimeError("opencode silent stall, no text in SQLite either")
 
     agent_text = latest_agent_text() or "[no text emitted]"
+    post_task_count = total_task_uses()
+    term(f"Turn {turn_n} done ({elapsed:.0f}s): "
+         f"{len(agent_text):,} chars, "
+         f"+{post_task_count - pre_task_count} subagents", level="ok")
     log(f"opencode_app: agent returned text len={len(agent_text)}, "
-        f"total task_uses so far={total_task_uses()}")
+        f"total task_uses so far={post_task_count}")
 
     return {"role": "assistant", "content": agent_text}
 
@@ -432,10 +501,12 @@ def is_terminal(trajectory, turn_counter=None, **kwargs):
     """
     if settled_design_written():
         log("is_terminal: SETTLED_DESIGN.md write detected - stopping")
+        term("SETTLED_DESIGN.md written — stopping", level="ok")
         return True
     txt = latest_agent_text() or ""
     if SETTLED_TEXT_RE.search(txt):
         log("is_terminal: settled-design heading detected in agent text - stopping")
+        term("settled-design heading detected — stopping", level="ok")
         return True
     return False
 
@@ -476,6 +547,113 @@ def write_transcript(trajectory, terminal_reason):
     TRAJECTORY.write_text(json.dumps(trajectory, indent=2, default=str))
 
 
+# -------- Pre-run safety checks --------
+def check_overwrite_guard():
+    """Refuse to clobber an already-graded rep unless --overwrite was passed.
+
+    The marker is `extracted_files/SETTLED_DESIGN.md` (the file
+    extract_grilling_artifacts.py writes when the agent emitted a
+    SETTLED_DESIGN.md). Re-running on top of this directory would lose
+    the graded artifact silently.
+    """
+    settled = OUTPUT_DIR / "extracted_files" / "SETTLED_DESIGN.md"
+    if settled.exists() and not OVERWRITE:
+        msg = (
+            f"ERROR: {settled} already exists.\n"
+            f"  Pass --overwrite to clobber, or pick a different --rep N.\n"
+            f"  (This rep has artifacts that would be lost otherwise.)"
+        )
+        print(msg, file=sys.stderr)
+        sys.exit(2)
+
+
+def check_docker_image():
+    """Log image creation time + most-recent prior run for comparison.
+
+    Docker images that bake the task source via `COPY . .` at build time
+    can drift between cells. We don't abort (sometimes a rebuild is
+    intended), but we log enough that the caller can spot drift.
+    """
+    try:
+        r = subprocess.run(
+            ["docker", "image", "inspect", DOCKER_IMAGE,
+             "--format", "{{.Created}}"],
+            capture_output=True, text=True, check=True, timeout=10,
+        )
+        created = r.stdout.strip()
+        log(f"docker image {DOCKER_IMAGE} created: {created}")
+        term(f"docker image {DOCKER_IMAGE}: built {created[:10]}")
+    except Exception as e:
+        log(f"WARN: docker image inspect failed: {e}")
+        term(f"docker image inspect failed: {e}", level="warn")
+        return
+
+    results_root = OUTPUT_DIR.parent.parent
+    try:
+        # Find the most recent run.log from a prior rep (excluding this one).
+        candidates = []
+        for log_path in results_root.glob("*/rep*/run.log"):
+            if log_path.parent == OUTPUT_DIR:
+                continue
+            candidates.append(log_path)
+        if candidates:
+            most_recent = max(candidates, key=lambda p: p.stat().st_mtime)
+            mtime = time.strftime(
+                "%Y-%m-%dT%H:%M:%SZ",
+                time.gmtime(most_recent.stat().st_mtime),
+            )
+            rel = most_recent.relative_to(results_root)
+            log(f"most recent prior run: {rel} (last write {mtime}) "
+                f"- compare to image creation above to spot source drift")
+            term(f"most recent prior run: {rel} ({mtime[:10]})")
+    except Exception as e:
+        log(f"WARN: prior-run scan failed: {e}")
+        term(f"prior-run scan failed: {e}", level="warn")
+
+
+# -------- Post-run chain --------
+def run_postprocess():
+    """Run extract → grade → viewer → compare. Each step is wrapped so
+    one failure doesn't undo upstream work.
+
+    Order:
+      1. extract: produces extracted_files/, subagents/, timeline.jsonl, stats.json
+      2. grade:   reads extracted_files/SETTLED_DESIGN.md → eval/eval_report.{json,md}
+      3. viewer:  builds per-rep viewer.html
+      4. compare: re-scans all eval_report.json → ranking
+    """
+    python = sys.executable
+    rep_dir = str(OUTPUT_DIR)
+
+    steps = [
+        ("extract", [python, str(SCRIPTS_DIR / "extract_grilling_artifacts.py"), rep_dir]),
+        ("grade",   [python, str(SCRIPTS_DIR / "grade_run.py"), rep_dir]),
+        ("viewer",  [python, str(SCRIPTS_DIR / "build_grilling_viewer.py"), rep_dir]),
+        ("compare", [python, str(SCRIPTS_DIR / "compare_runs.py")]),
+    ]
+    for name, cmd in steps:
+        log(f"postprocess: {name} starting")
+        term(f"{name} running…")
+        t0 = time.time()
+        try:
+            r = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=900,
+            )
+            dt = time.time() - t0
+            if r.returncode != 0:
+                tail = (r.stderr or r.stdout)[:200].replace("\n", " ")
+                log(f"postprocess: {name} FAILED (exit {r.returncode}): "
+                    f"{(r.stderr or r.stdout)[:400]}")
+                term(f"{name} FAILED (exit {r.returncode}): {tail}",
+                     level="fail")
+            else:
+                log(f"postprocess: {name} OK")
+                term(f"{name} OK ({dt:.1f}s)", level="ok")
+        except Exception as e:
+            log(f"postprocess: {name} EXCEPTION: {type(e).__name__}: {e}")
+            term(f"{name} EXCEPTION: {type(e).__name__}: {e}", level="fail")
+
+
 # -------- Configuration --------
 def configure(args):
     """Populate module-level config from parsed args + env.
@@ -487,7 +665,7 @@ def configure(args):
     global REP, MAX_TURNS, CELL, OUTPUT_DIR, STATE_DIR, PERSONA_FILE
     global RAW_EXPORT, RUN_LOG, TRANSCRIPT, TRAJECTORY, SIM_LOG, ENV_FILE
     global DOCKER_IMAGE, AGENT_MODEL, OPENCODE_CONFIG, SIMULATOR_MODEL
-    global INITIAL_PROMPT
+    global INITIAL_PROMPT, OVERWRITE, NO_POSTPROCESS, VERBOSE
 
     REP = args.rep
     MAX_TURNS = args.max_turns
@@ -495,6 +673,9 @@ def configure(args):
     AGENT_MODEL = args.agent_model
     SIMULATOR_MODEL = args.simulator_model
     DOCKER_IMAGE = args.docker_image
+    OVERWRITE = args.overwrite
+    NO_POSTPROCESS = args.no_postprocess
+    VERBOSE = args.verbose
 
     results_root = Path(os.environ.get("EVAL_RESULTS_ROOT", REPO_ROOT / "results"))
     state_root = Path(os.environ.get("EVAL_STATE_ROOT", "/tmp"))
@@ -549,6 +730,12 @@ def main():
                          "Overrides $EVAL_OPENCODE_CONFIG.")
     ap.add_argument("--max-turns", type=int, default=15,
                     help="Max OpenEvals simulation turns (default: 15).")
+    ap.add_argument("--overwrite", action="store_true",
+                    help="Allow re-running a rep that already has a SETTLED_DESIGN.md.")
+    ap.add_argument("--no-postprocess", action="store_true",
+                    help="Skip the extract/grade/viewer/compare auto-chain.")
+    ap.add_argument("-v", "--verbose", action="store_true",
+                    help="Mirror the run.log to stdout (default: clean term UI only).")
     args = ap.parse_args()
 
     configure(args)
@@ -558,7 +745,10 @@ def main():
     # Reset closure-state so re-running main() within the same process is safe
     _session_id["value"] = None
 
+    # Pre-run safety: refuse to clobber an already-graded rep unless --overwrite.
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    check_overwrite_guard()
+
     if STATE_DIR.exists():
         subprocess.run(["rm", "-rf", str(STATE_DIR)], check=False)
     STATE_DIR.mkdir()
@@ -572,16 +762,40 @@ def main():
     log(f"=== starting grilling run ({CELL}) - agent={AGENT_MODEL}, "
         f"sim={SIMULATOR_MODEL} ===")
 
-    # Build the simulator client (uses the same .env as the agent).
-    openai_key = load_env_var("OPENAI_API_KEY")
+    banner(f"Grilling run · {CELL} · rep {REP}")
+    kv("agent",     AGENT_MODEL)
+    kv("sim",       SIMULATOR_MODEL)
+    kv("max turns", MAX_TURNS)
+    kv("output",    str(OUTPUT_DIR))
+    kv("log file",  str(RUN_LOG))
+    print()
+
+    # Pre-run safety: log docker image vintage so caller can spot stale builds.
+    check_docker_image()
+
+    # Build the simulator client.
+    # Routing rule: "/" in SIMULATOR_MODEL → OpenRouter; else OpenAI direct.
+    # Provider-prefixed model strings like "deepseek/deepseek-v4-pro" only
+    # resolve on OpenRouter; bare names like "gpt-5.5" go to OpenAI.
     sim_logger = SimulatorLogger(SIM_LOG)
+    if "/" in SIMULATOR_MODEL:
+        sim_api_key = load_env_var("OPENROUTER_API_KEY")
+        sim_extra = dict(api_key=sim_api_key,
+                         base_url="https://openrouter.ai/api/v1")
+        log("SIM routing: OpenRouter ('/' in model name)")
+        term("SIM routing: OpenRouter")
+    else:
+        sim_api_key = load_env_var("OPENAI_API_KEY")
+        sim_extra = dict(api_key=sim_api_key)
+        log("SIM routing: OpenAI direct (no '/' in model name)")
+        term("SIM routing: OpenAI direct")
     simulator_client = ChatOpenAI(
         model=SIMULATOR_MODEL,
-        api_key=openai_key,
         max_tokens=2000,
         max_retries=4,   # catch transient APIConnectionError / 5xx
         request_timeout=60,
         callbacks=[sim_logger],
+        **sim_extra,
     )
 
     persona_prompt = PERSONA_FILE.read_text()
@@ -599,6 +813,8 @@ def main():
 
     # Run the multi-turn simulation
     log(f"calling run_multiturn_simulation, max_turns={MAX_TURNS}")
+    banner(f"Conversation · up to {MAX_TURNS} turns")
+    t_run = time.time()
     try:
         result = run_multiturn_simulation(
             app=opencode_app,
@@ -608,8 +824,10 @@ def main():
         )
     except Exception as e:
         log(f"run_multiturn_simulation raised: {type(e).__name__}: {e}")
+        term(f"simulation raised: {type(e).__name__}: {e}", level="fail")
         # Try to capture what we have
         raise
+    run_elapsed = time.time() - t_run
 
     # Result is a dict with key "trajectory" (list of messages)
     trajectory_msgs = result.get("trajectory", []) if isinstance(result, dict) else []
@@ -628,7 +846,40 @@ def main():
 
     write_transcript(final_traj, reason)
     log(f"=== done - transcript at {TRANSCRIPT} ===")
-    return 0
+
+    # Post-run validation: the SETTLED_DESIGN.md write is the load-bearing
+    # artifact for grading. If it never landed, the rep is unscorable.
+    settled_ok = settled_design_written()
+    if not settled_ok:
+        log("VALIDATION FAILED: agent did not write SETTLED_DESIGN.md - "
+            "this rep is unscorable. Re-run with more turns, or grade "
+            "manually after recovering what's in extracted_files/.")
+
+    banner("Summary")
+    kv("terminal",   reason)
+    kv("messages",   f"{n_messages} (max would be {MAX_TURNS * 2})")
+    kv("task uses",  total_task_uses())
+    kv("wall time",  f"{run_elapsed:.0f}s")
+    kv("transcript", str(TRANSCRIPT))
+    if settled_ok:
+        term("SETTLED_DESIGN.md present — rep is scorable", level="ok")
+    else:
+        term("SETTLED_DESIGN.md missing — rep is UNSCORABLE", level="fail")
+    print()
+
+    if settled_ok and not NO_POSTPROCESS:
+        log("=== postprocess chain starting ===")
+        banner("Post-processing")
+        run_postprocess()
+        log("=== postprocess chain complete ===")
+    elif NO_POSTPROCESS:
+        log("postprocess: skipped (--no-postprocess)")
+        term("postprocess skipped (--no-postprocess)", level="warn")
+    else:
+        log("postprocess: skipped (no SETTLED_DESIGN.md to grade)")
+        term("postprocess skipped (no SETTLED to grade)", level="warn")
+
+    return 0 if settled_ok else 3
 
 
 if __name__ == "__main__":
