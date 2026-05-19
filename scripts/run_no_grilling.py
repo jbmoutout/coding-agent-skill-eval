@@ -107,6 +107,13 @@ def main():
     (output_dir / "initial_prompt.txt").write_text(initial_prompt)
 
     or_key = load_env_var("OPENROUTER_API_KEY", env_file)
+    # --dangerously-skip-permissions is required: the eval runs inside an
+    # ephemeral docker container with `--rm`, the only secret is the
+    # OpenRouter key (rate-limited dev tier), and the workspace is
+    # throwaway. Without it, opencode blocks on permission prompts that
+    # cannot be answered in a non-TTY subprocess and every tool call
+    # stalls. The shell-injection class is closed separately by the argv
+    # form below — do NOT reintroduce shell-wrapped launches.
     cmd = [
         "docker", "run", "--rm",
         "-v", f"{output_dir}:/results",
@@ -115,6 +122,7 @@ def main():
         "-w", "/app",
         args.docker_image,
         "/root/.opencode/bin/opencode", "run",
+        "--dangerously-skip-permissions",
         "--format", "json",
         "--model", args.agent_model,
         initial_prompt,

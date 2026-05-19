@@ -387,8 +387,16 @@ def opencode_app(message, thread_id=None, **kwargs):
     if not message_to_send:
         message_to_send = "Please continue."
 
+    # --dangerously-skip-permissions is required: the eval runs inside an
+    # ephemeral docker container with `--rm`, the only secret is the
+    # OpenRouter key (rate-limited dev tier), and the workspace is
+    # throwaway. Without it, opencode blocks on permission prompts that
+    # cannot be answered in a non-TTY subprocess and every tool call
+    # stalls. The shell-injection class is closed separately by the argv
+    # form below — do NOT reintroduce shell-wrapped launches.
     opencode_cmd = [
         "/root/.opencode/bin/opencode", "run",
+        "--dangerously-skip-permissions",
         "--format", "json",
         "--model", AGENT_MODEL,
     ]
