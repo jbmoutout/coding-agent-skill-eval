@@ -42,6 +42,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -81,6 +82,7 @@ VERBOSE = False
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPTS_DIR.parent
+SAFE_CELL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 
 
 # -------- Pretty terminal output --------
@@ -121,6 +123,23 @@ def banner(title):
     print(_cyan(f"\n{bar}"), flush=True)
     print(_cyan(f"  {title}"), flush=True)
     print(_cyan(f"{bar}"), flush=True)
+
+
+def validate_cell(cell: str) -> str:
+    if not SAFE_CELL_RE.fullmatch(cell):
+        raise ValueError(
+            "cell must be a slug containing only letters, numbers, '.', '_', "
+            "or '-', and must start with a letter or number"
+        )
+    return cell
+
+
+def contained_path(root: Path, *parts: str) -> Path:
+    root = root.resolve()
+    path = root.joinpath(*parts).resolve()
+    if path != root and root not in path.parents:
+        raise ValueError(f"path escapes root: {path}")
+    return path
 
 
 def kv(label, value):
@@ -368,26 +387,27 @@ def opencode_app(message, thread_id=None, **kwargs):
     if not message_to_send:
         message_to_send = "Please continue."
 
-    sess_flag = (
-        f"--session {_session_id['value']}" if _session_id["value"] else ""
-    )
-    escaped = message_to_send.replace("'", "'\\''")
-    cmd_inside = (
-        f"cd /app && /root/.opencode/bin/opencode run "
-        f"--dangerously-skip-permissions --format json "
-        f"--model {AGENT_MODEL} {sess_flag} '{escaped}'"
-    )
+    opencode_cmd = [
+        "/root/.opencode/bin/opencode", "run",
+        "--format", "json",
+        "--model", AGENT_MODEL,
+    ]
+    if _session_id["value"]:
+        opencode_cmd.extend(["--session", _session_id["value"]])
+    opencode_cmd.append(message_to_send)
+
     cmd = [
         "docker", "run", "--rm",
         "-v", f"{OUTPUT_DIR}:/results",
         "-v", f"{STATE_DIR}:/root/.local/share/opencode",
         "-v", f"{OPENCODE_CONFIG}:/app/opencode.json:ro",
-        "-e", f"OPENROUTER_API_KEY={OPENROUTER_API_KEY}",
-        "--entrypoint", "/bin/sh",
+        "-e", "OPENROUTER_API_KEY",
+        "-w", "/app",
         DOCKER_IMAGE,
-        "-c",
-        f"({cmd_inside}) >> /results/raw_export.jsonl 2>> /results/run.log",
+        *opencode_cmd,
     ]
+    child_env = os.environ.copy()
+    child_env["OPENROUTER_API_KEY"] = OPENROUTER_API_KEY
 
     # Snapshot the text-event count BEFORE the call so we can detect whether
     # a new agent text actually landed (docker can exit 0 with no new events
@@ -400,8 +420,18 @@ def opencode_app(message, thread_id=None, **kwargs):
     log(f"opencode_app: sending msg len={len(message_to_send)}, "
         f"session={_session_id['value'] or '<new>'}")
     t0 = time.time()
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+    result = subprocess.run(
+        cmd, capture_output=True, text=True, timeout=900, env=child_env,
+    )
     elapsed = time.time() - t0
+    if result.stdout:
+        with open(RAW_EXPORT, "a") as f:
+            f.write(result.stdout)
+    if result.stderr:
+        with open(RUN_LOG, "a") as f:
+            f.write(result.stderr)
+            if not result.stderr.endswith("\n"):
+                f.write("\n")
     log(f"opencode_app: docker exit={result.returncode}, wall={elapsed:.1f}s")
     if result.returncode != 0:
         log(f"opencode_app: stderr: {result.stderr[:500]}")
@@ -669,7 +699,7 @@ def configure(args):
 
     REP = args.rep
     MAX_TURNS = args.max_turns
-    CELL = args.cell
+    CELL = validate_cell(args.cell)
     AGENT_MODEL = args.agent_model
     SIMULATOR_MODEL = args.simulator_model
     DOCKER_IMAGE = args.docker_image
@@ -680,8 +710,8 @@ def configure(args):
     results_root = Path(os.environ.get("EVAL_RESULTS_ROOT", REPO_ROOT / "results"))
     state_root = Path(os.environ.get("EVAL_STATE_ROOT", "/tmp"))
 
-    OUTPUT_DIR = results_root / CELL / f"rep{REP}"
-    STATE_DIR = state_root / f"opencode-grilling-{CELL}-rep{REP}"
+    OUTPUT_DIR = contained_path(results_root, CELL, f"rep{REP}")
+    STATE_DIR = contained_path(state_root, f"opencode-grilling-{CELL}-rep{REP}")
     RAW_EXPORT = OUTPUT_DIR / "raw_export.jsonl"
     RUN_LOG = OUTPUT_DIR / "run.log"
     TRANSCRIPT = OUTPUT_DIR / "transcript.md"
@@ -750,7 +780,7 @@ def main():
     check_overwrite_guard()
 
     if STATE_DIR.exists():
-        subprocess.run(["rm", "-rf", str(STATE_DIR)], check=False)
+        shutil.rmtree(STATE_DIR)
     STATE_DIR.mkdir()
 
     # Clean prior outputs

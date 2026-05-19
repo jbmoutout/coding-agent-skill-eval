@@ -27,6 +27,8 @@ Env:
 import argparse
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 import time
@@ -34,6 +36,7 @@ from pathlib import Path
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPTS_DIR.parent
+SAFE_CELL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 
 
 def load_env_var(name: str, env_file: Path) -> str:
@@ -41,6 +44,23 @@ def load_env_var(name: str, env_file: Path) -> str:
         if line.startswith(f"{name}="):
             return line.split("=", 1)[1].strip().strip("'\"")
     raise RuntimeError(f"{name} not found in {env_file}")
+
+
+def validate_cell(cell: str) -> str:
+    if not SAFE_CELL_RE.fullmatch(cell):
+        raise ValueError(
+            "cell must be a slug containing only letters, numbers, '.', '_', "
+            "or '-', and must start with a letter or number"
+        )
+    return cell
+
+
+def contained_path(root: Path, *parts: str) -> Path:
+    root = root.resolve()
+    path = root.joinpath(*parts).resolve()
+    if path != root and root not in path.parents:
+        raise ValueError(f"path escapes root: {path}")
+    return path
 
 
 def parse_args():
@@ -68,15 +88,16 @@ def main():
         os.environ.get("EVAL_RESULTS_ROOT", REPO_ROOT / "results"))
     state_root = Path(os.environ.get("EVAL_STATE_ROOT", "/tmp"))
     env_file = Path(os.environ.get("EVAL_ENV_FILE", REPO_ROOT / ".env"))
+    cell = validate_cell(args.cell)
 
-    output_dir = results_root / args.cell / f"rep{args.rep}"
-    state_dir = state_root / f"opencode-{args.cell}-rep{args.rep}"
+    output_dir = contained_path(results_root, cell, f"rep{args.rep}")
+    state_dir = contained_path(state_root, f"opencode-{cell}-rep{args.rep}")
     raw_export = output_dir / "raw_export.jsonl"
     run_log = output_dir / "run.log"
 
     output_dir.mkdir(parents=True, exist_ok=True)
     if state_dir.exists():
-        subprocess.run(["rm", "-rf", str(state_dir)], check=False)
+        shutil.rmtree(state_dir)
     state_dir.mkdir(parents=True, exist_ok=True)
     for f in (raw_export, run_log):
         if f.exists():
@@ -86,22 +107,20 @@ def main():
     (output_dir / "initial_prompt.txt").write_text(initial_prompt)
 
     or_key = load_env_var("OPENROUTER_API_KEY", env_file)
-    escaped = initial_prompt.replace("'", "'\\''")
-    cmd_inside = (
-        f"cd /app && /root/.opencode/bin/opencode run "
-        f"--dangerously-skip-permissions --format json "
-        f"--model {args.agent_model} '{escaped}'"
-    )
     cmd = [
         "docker", "run", "--rm",
         "-v", f"{output_dir}:/results",
         "-v", f"{state_dir}:/root/.local/share/opencode",
-        "-e", f"OPENROUTER_API_KEY={or_key}",
-        "--entrypoint", "/bin/sh",
+        "-e", "OPENROUTER_API_KEY",
+        "-w", "/app",
         args.docker_image,
-        "-c",
-        f"({cmd_inside}) >> /results/raw_export.jsonl 2>> /results/run.log",
+        "/root/.opencode/bin/opencode", "run",
+        "--format", "json",
+        "--model", args.agent_model,
+        initial_prompt,
     ]
+    child_env = os.environ.copy()
+    child_env["OPENROUTER_API_KEY"] = or_key
 
     def ts():
         return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -118,13 +137,18 @@ def main():
     t0 = time.time()
     result = subprocess.run(
         cmd, capture_output=True, text=True,
-        timeout=args.max_wall_seconds,
+        timeout=args.max_wall_seconds, env=child_env,
     )
     elapsed = time.time() - t0
+    if result.stdout:
+        with open(raw_export, "a") as f:
+            f.write(result.stdout)
     with open(run_log, "a") as f:
         f.write(f"{ts()} docker exit={result.returncode}, wall={elapsed:.1f}s\n")
-        if result.returncode != 0:
-            f.write(f"{ts()} stderr: {result.stderr[:500]}\n")
+        if result.stderr:
+            f.write(result.stderr)
+            if not result.stderr.endswith("\n"):
+                f.write("\n")
     print(f"  docker exit={result.returncode}, wall={elapsed:.1f}s")
     if result.returncode != 0:
         print(f"  ERROR: {result.stderr[:200]}")
